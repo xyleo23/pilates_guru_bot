@@ -1,4 +1,4 @@
 """Services module."""
-from .yclients import YClientsService
+from .yclients import YClientsNotConfigured, YClientsService
 
-__all__ = ["YClientsService"]
+__all__ = ["YClientsService", "YClientsNotConfigured"]

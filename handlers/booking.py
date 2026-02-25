@@ -6,9 +6,12 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from services.yclients import YClientsService
+from services.yclients import YClientsNotConfigured, YClientsService
+from services.payment import create_payment, check_payment
 from config import YCLIENTS_TOKEN, YCLIENTS_USER_TOKEN, YCLIENTS_COMPANY_ID
-from data.studio_info import PRICES, TRAINERS
+from data.studio_info import PRICES, STUDIO, TRAINERS, TRAINERS_INFO
+
+UNAVAILABLE_MSG = f"Онлайн-запись временно недоступна. Позвоните нам: {STUDIO['phone']}"
 
 router = Router(name="booking")
 
@@ -27,12 +30,17 @@ class BookingStates(StatesGroup):
     enter_phone = State()
     enter_email = State()
     confirm = State()
+    payment = State()
 
 
 @router.callback_query(F.data == "menu:booking")
 async def start_booking(callback: CallbackQuery, state: FSMContext):
     """Start booking flow."""
+    data = await state.get_data()
+    preferred_trainer = data.get("preferred_trainer")
     await state.clear()
+    if preferred_trainer:
+        await state.update_data(preferred_trainer=preferred_trainer)
     await callback.answer()
 
     try:
@@ -69,6 +77,8 @@ async def start_booking(callback: CallbackQuery, state: FSMContext):
             "Выберите тип занятия:",
             reply_markup=builder.as_markup(),
         )
+    except YClientsNotConfigured:
+        await callback.message.answer(UNAVAILABLE_MSG)
     except Exception as e:
         await callback.message.answer(f"Ошибка при загрузке услуг: {e}")
 
@@ -83,6 +93,11 @@ async def chose_service(callback: CallbackQuery, state: FSMContext):
     try:
         staff = await yclients.get_staff(service_id=service_id)
         staff = [s for s in staff if s.get("bookable", True)]
+        for s in staff:
+            name = s.get("name", "")
+            info = TRAINERS_INFO.get(name, {})
+            s["best_for"] = info.get("best_for", "")
+            s["experience"] = info.get("experience", "")
         if not staff:
             staff = [{"id": i + 1, "name": name} for i, name in enumerate(TRAINERS)]
         if not staff:
@@ -92,11 +107,35 @@ async def chose_service(callback: CallbackQuery, state: FSMContext):
             await start_booking(callback, state)
             return
 
+        data = await state.get_data()
+        preferred_trainer = data.get("preferred_trainer")
+
+        def _norm(s: str) -> str:
+            return (s or "").strip().casefold().replace("ё", "е")
+
+        if preferred_trainer:
+            preferred_list = [
+                s for s in staff
+                if _norm(s.get("name", "")) == _norm(preferred_trainer)
+            ]
+            other_list = [
+                s for s in staff
+                if _norm(s.get("name", "")) != _norm(preferred_trainer)
+            ]
+            staff = preferred_list + other_list
+
         builder = InlineKeyboardBuilder()
         for s in staff[:10]:
             sid = s.get("id")
             name = (s.get("name") or "Инструктор")[:35]
-            builder.button(text=name, callback_data=f"book_staff:{sid}")
+            is_recommended = (
+                preferred_trainer
+                and _norm(s.get("name", "")) == _norm(preferred_trainer)
+            )
+            prefix = "⭐ Рекомендуем " if is_recommended else ""
+            desc = s.get("best_for") or s.get("experience") or ""
+            label = prefix + f"{name}" + (f" — {desc[:25]}…" if len(desc) > 25 else f" — {desc}" if desc else "")
+            builder.button(text=label[:60], callback_data=f"book_staff:{sid}")
         builder.button(text="❌ Отмена", callback_data="menu:main")
         builder.adjust(1)
 
@@ -105,6 +144,8 @@ async def chose_service(callback: CallbackQuery, state: FSMContext):
             "Выберите инструктора:",
             reply_markup=builder.as_markup(),
         )
+    except YClientsNotConfigured:
+        await callback.message.answer(UNAVAILABLE_MSG)
     except Exception as e:
         await callback.message.answer(f"Ошибка: {e}")
 
@@ -120,9 +161,7 @@ async def chose_staff(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
     try:
-        dates = await yclients.get_available_dates(
-            staff_id=staff_id, service_id=service_id
-        )
+        dates = await yclients.get_available_dates(staff_id, service_id)
         if not dates:
             await callback.message.edit_text(
                 "Нет свободных дат. Попробуйте другого инструктора."
@@ -130,11 +169,15 @@ async def chose_staff(callback: CallbackQuery, state: FSMContext):
             return
 
         builder = InlineKeyboardBuilder()
-        for ts in dates[:14]:
-            dt = datetime.fromtimestamp(ts)
+        for date_str in dates[:14]:
+            try:
+                dt = datetime.strptime(date_str, "%Y-%m-%d")
+                label = dt.strftime("%d.%m.%Y")
+            except (ValueError, TypeError):
+                label = date_str
             builder.button(
-                text=dt.strftime("%d.%m.%Y"),
-                callback_data=f"book_date:{ts}",
+                text=label,
+                callback_data=f"book_date:{date_str}",
             )
         builder.button(text="❌ Отмена", callback_data="menu:main")
         builder.adjust(2)
@@ -144,6 +187,8 @@ async def chose_staff(callback: CallbackQuery, state: FSMContext):
             "Выберите дату:",
             reply_markup=builder.as_markup(),
         )
+    except YClientsNotConfigured:
+        await callback.message.answer(UNAVAILABLE_MSG)
     except Exception as e:
         await callback.message.answer(f"Ошибка: {e}")
 
@@ -151,13 +196,17 @@ async def chose_staff(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(BookingStates.choose_date, F.data.startswith("book_date:"))
 async def chose_date(callback: CallbackQuery, state: FSMContext):
     """User chose date, show times."""
-    ts = int(callback.data.split(":")[1])
-    date_str = datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
+    raw = callback.data.split(":", 1)[1]
+    try:
+        ts = int(raw)
+        date_str = datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
+    except (ValueError, OSError):
+        date_str = raw  # уже YYYY-MM-DD
     data = await state.get_data()
     staff_id = data.get("staff_id")
     service_id = data.get("service_id")
 
-    await state.update_data(booking_date=date_str, booking_ts=ts)
+    await state.update_data(booking_date=date_str)
     await callback.answer()
 
     try:
@@ -172,16 +221,19 @@ async def chose_date(callback: CallbackQuery, state: FSMContext):
         builder = InlineKeyboardBuilder()
         for i, t in enumerate(times[:20]):
             if isinstance(t, dict):
-                tid = t.get("id") or t.get("datetime", "")
-                dt_str = t.get("datetime", "")
-                if isinstance(dt_str, str) and "T" in dt_str:
-                    try:
-                        dt = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
-                        label = dt.strftime("%H:%M")
-                    except Exception:
-                        label = str(dt_str)[:16]
+                dt_str = t.get("datetime", "") or t.get("time", "")
+                if isinstance(dt_str, str):
+                    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%H:%M"):
+                        try:
+                            dt = datetime.strptime(dt_str.replace("Z", "")[:19], fmt)
+                            label = dt.strftime("%H:%M")
+                            break
+                        except (ValueError, TypeError):
+                            continue
+                    else:
+                        label = str(dt_str)[:8]
                 else:
-                    label = str(tid)[:10]
+                    label = str(t.get("time", ""))[:8]
                 builder.button(text=label, callback_data=f"book_time:{i}")
             else:
                 builder.button(text=str(t), callback_data=f"book_time:{i}")
@@ -193,8 +245,22 @@ async def chose_date(callback: CallbackQuery, state: FSMContext):
             "Выберите время:",
             reply_markup=builder.as_markup(),
         )
+    except YClientsNotConfigured:
+        await callback.message.answer(UNAVAILABLE_MSG)
     except Exception as e:
         await callback.message.answer(f"Ошибка: {e}")
+
+
+def _to_yclients_datetime(s: str, date_str: str = "") -> str:
+    """Привести к формату YClients: YYYY-MM-DD HH:MM:SS."""
+    if not s:
+        return f"{date_str} 09:00:00" if date_str else ""
+    s = str(s).replace("Z", "").replace("+00:00", "").replace("+03:00", "").strip()
+    if "T" in s:
+        s = s.replace("T", " ")[:19]
+    if len(s) == 10 and date_str:
+        return f"{date_str} 09:00:00"
+    return s[:19] if len(s) >= 19 else s
 
 
 @router.callback_query(BookingStates.choose_time, F.data.startswith("book_time:"))
@@ -208,21 +274,17 @@ async def chose_time(callback: CallbackQuery, state: FSMContext):
         return
 
     t = times[idx]
+    date_str = data.get("booking_date", "")
     if isinstance(t, dict):
-        booking_id = str(t.get("id", ""))
-        datetime_str = t.get("datetime", "")
-        if not datetime_str:
-            date_str = data.get("booking_date", "")
-            datetime_str = f"{date_str}T09:00:00+03:00"
+        datetime_str = _to_yclients_datetime(
+            t.get("datetime", "") or t.get("time", ""), date_str
+        )
     else:
-        date_str = data.get("booking_date", "")
-        booking_id = str(t)
-        datetime_str = f"{date_str}T09:00:00+03:00"
+        datetime_str = f"{date_str} 09:00:00"
+    if not datetime_str:
+        datetime_str = f"{date_str} 09:00:00"
 
-    if not datetime_str.endswith(("+00:00", "+03:00", "Z")) and "+" not in datetime_str:
-        datetime_str = f"{datetime_str}+03:00"
-
-    await state.update_data(booking_id=booking_id, booking_datetime=datetime_str)
+    await state.update_data(booking_datetime=datetime_str)
     await state.set_state(BookingStates.enter_name)
     await callback.answer()
     await callback.message.edit_text("Введите ваше имя (ФИО):")
@@ -263,11 +325,11 @@ async def show_confirm(message: Message, state: FSMContext):
     builder.button(text="❌ Отмена", callback_data="menu:main")
     builder.adjust(1)
 
-    dt_str = data.get("booking_datetime", "")
+    dt_str = str(data.get("booking_datetime", ""))[:19].replace("T", " ")
     try:
-        dt = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
+        dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")
         dt_display = dt.strftime("%d.%m.%Y в %H:%M")
-    except Exception:
+    except (ValueError, TypeError):
         dt_display = dt_str
 
     text = (
@@ -281,9 +343,36 @@ async def show_confirm(message: Message, state: FSMContext):
     await message.answer(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
 
 
+def _get_service_amount(services: list, service_id: int) -> float:
+    """Извлечь цену услуги из списка услуг."""
+    for s in services or []:
+        sid = s.get("id") or s.get("api_id")
+        if sid == service_id:
+            p = s.get("price")
+            if p is None:
+                return 0.0
+            if isinstance(p, (int, float)):
+                return float(p)
+            s_clean = str(p).replace(" ", "").replace("₽", "").strip()
+            try:
+                return float("".join(c for c in s_clean if c.isdigit() or c == "."))
+            except ValueError:
+                return 0.0
+    return 0.0
+
+
+def _get_service_title(services: list, service_id: int) -> str:
+    """Название услуги для описания платежа."""
+    for s in services or []:
+        sid = s.get("id") or s.get("api_id")
+        if sid == service_id:
+            return (s.get("title") or s.get("name") or "Занятие")[:100]
+    return "Занятие Pilates Guru"
+
+
 @router.callback_query(BookingStates.confirm, F.data == "book_confirm")
 async def confirm_booking(callback: CallbackQuery, state: FSMContext):
-    """Create booking in YClients."""
+    """Создать платёж и показать шаг оплаты."""
     data = await state.get_data()
     await callback.answer()
 
@@ -292,36 +381,128 @@ async def confirm_booking(callback: CallbackQuery, state: FSMContext):
     email = data.get("email", "") or "noreply@pilates.local"
     service_id = data.get("service_id")
     staff_id = data.get("staff_id")
-    booking_id = data.get("booking_id")
     datetime_str = data.get("booking_datetime")
+    services = data.get("services", [])
 
-    if not all([fullname, phone, service_id, staff_id, booking_id, datetime_str]):
+    if not all([fullname, phone, service_id, staff_id, datetime_str]):
         await callback.message.answer("Ошибка: неполные данные. Начните запись заново.")
         await state.clear()
         return
 
-    try:
-        success, msg = await yclients.create_booking(
-            fullname=fullname,
-            phone=phone,
-            email=email,
-            service_id=service_id,
-            staff_id=staff_id,
-            booking_id=str(booking_id),
-            datetime_str=datetime_str,
+    amount = _get_service_amount(services, service_id)
+    if amount <= 0:
+        await callback.message.answer(
+            "Не удалось определить стоимость. Позвоните нам для записи: "
+            f"{STUDIO['phone']}"
         )
         await state.clear()
+        return
 
-        if success:
-            await callback.message.edit_text(
-                f"✅ {msg}\n\n"
-                f"Ждём вас на занятии! 🙏"
-            )
-        else:
-            await callback.message.edit_text(
-                f"❌ Не удалось создать запись:\n{msg}\n\n"
-                f"Попробуйте снова или свяжитесь с нами."
-            )
-    except Exception as e:
+    description = _get_service_title(services, service_id)
+    user_id = callback.from_user.id if callback.from_user else 0
+    metadata = {
+        "service_id": str(service_id),
+        "staff_id": str(staff_id),
+        "datetime": datetime_str,
+        "tg_user_id": str(user_id),
+    }
+
+    payment = await create_payment(
+        amount=amount,
+        description=description,
+        metadata=metadata,
+    )
+
+    if not payment:
+        await callback.message.edit_text(
+            "Ошибка при создании платежа. Позвоните нам: " + STUDIO["phone"]
+        )
         await state.clear()
-        await callback.message.edit_text(f"Ошибка при создании записи: {e}")
+        return
+
+    payment_id = payment["id"]
+    confirmation_url = payment["confirmation_url"]
+    await state.update_data(payment_id=payment_id)
+    await state.set_state(BookingStates.payment)
+
+    builder = InlineKeyboardBuilder()
+    builder.button(text=f"💳 Оплатить {int(amount)} ₽", url=confirmation_url)
+    builder.button(
+        text="🔄 Проверить оплату",
+        callback_data=f"check_payment:{payment_id}",
+    )
+    builder.button(text="❌ Отменить", callback_data="menu:main")
+    builder.adjust(1)
+
+    await callback.message.edit_text(
+        f"Оплатите *{int(amount)} ₽* для подтверждения записи.\n\n"
+        "Нажмите кнопку ниже для перехода к оплате.",
+        reply_markup=builder.as_markup(),
+        parse_mode="Markdown",
+    )
+
+
+@router.callback_query(BookingStates.payment, F.data.startswith("check_payment:"))
+async def handle_check_payment(callback: CallbackQuery, state: FSMContext):
+    """Проверить статус платежа и при успехе создать запись."""
+    payment_id = callback.data.split(":", 1)[1]
+    await callback.answer()
+
+    status = await check_payment(payment_id)
+
+    if status == "succeeded":
+        data = await state.get_data()
+        fullname = data.get("fullname", "")
+        phone = data.get("phone", "")
+        email = data.get("email", "") or "noreply@pilates.local"
+        service_id = data.get("service_id")
+        staff_id = data.get("staff_id")
+        datetime_str = data.get("booking_datetime")
+
+        try:
+            success, msg, record_id = await yclients.create_booking(
+                fullname=fullname,
+                phone=phone,
+                email=email,
+                service_id=service_id,
+                staff_id=staff_id,
+                datetime_str=datetime_str,
+            )
+            await state.clear()
+            if success:
+                await callback.message.edit_text(
+                    f"✅ {msg}\n\nЖдём вас на занятии! 🙏"
+                )
+            else:
+                await callback.message.edit_text(
+                    f"Оплата прошла, но запись не создана: {msg}\n"
+                    f"Позвоните нам: {STUDIO['phone']}"
+                )
+        except YClientsNotConfigured:
+            await state.clear()
+            await callback.message.edit_text(UNAVAILABLE_MSG)
+        except Exception as e:
+            await state.clear()
+            await callback.message.edit_text(
+                f"Ошибка при создании записи: {e}\n"
+                f"Позвоните нам: {STUDIO['phone']}"
+            )
+
+    elif status == "pending":
+        await callback.answer(
+            "Оплата ещё не прошла. Попробуйте через минуту.",
+            show_alert=True,
+        )
+
+    elif status == "canceled":
+        await state.clear()
+        await callback.message.edit_text(
+            "Платёж отменён. Начните запись заново."
+        )
+
+    else:
+        await callback.message.edit_text(
+            f"Ошибка проверки. Позвоните нам: {STUDIO['phone']}"
+        )
+
+
