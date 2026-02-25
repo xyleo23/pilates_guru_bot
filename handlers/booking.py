@@ -509,9 +509,23 @@ async def show_confirm(message: Message, state: FSMContext):
     await message.answer(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
 
 
+def _flatten_services(services: list) -> list:
+    """Flatten nested lists into a single flat list (e.g. [[...], [...]] -> [...])."""
+    flat = []
+    for item in services or []:
+        if isinstance(item, list):
+            flat.extend(_flatten_services(item))
+        else:
+            flat.append(item)
+    return flat
+
+
 def _get_service_amount(services: list, service_id: int) -> float:
     """Извлечь цену услуги из списка услуг."""
-    for s in services or []:
+    flat = _flatten_services(services)
+    for s in flat:
+        if not isinstance(s, dict):
+            continue
         sid = s.get("id") or s.get("api_id")
         if sid == service_id:
             p = s.get("price")
@@ -529,7 +543,10 @@ def _get_service_amount(services: list, service_id: int) -> float:
 
 def _get_service_title(services: list, service_id: int) -> str:
     """Название услуги для описания платежа."""
-    for s in services or []:
+    flat = _flatten_services(services)
+    for s in flat:
+        if not isinstance(s, dict):
+            continue
         sid = s.get("id") or s.get("api_id")
         if sid == service_id:
             return (s.get("title") or s.get("name") or "Занятие")[:100]

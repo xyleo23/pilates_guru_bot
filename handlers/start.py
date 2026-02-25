@@ -38,7 +38,6 @@ def get_main_keyboard():
 async def cmd_start(message: Message):
     """Handle /start command."""
     text = (
-        f"Namaste! 🙏\n\n"
         f"Добро пожаловать в студию пилатеса *{STUDIO['name']}*!\n\n"
         f"Помогу записаться на тренировку, расскажу о ценах и расписании.\n\n"
         f"Вы можете воспользоваться меню ниже или просто написать текстом / "
@@ -53,15 +52,6 @@ async def cmd_start(message: Message):
     )
     await message.answer(
         "Или выберите из меню:",
-        reply_markup=get_main_keyboard(),
-    )
-
-
-@router.message(F.text.in_(["👤 Мой профиль", "ℹ️ О студии", "❓ Помощь"]))
-async def on_reply_menu_button(message: Message):
-    """Обработка кнопок Reply-клавиатуры: показать inline-меню."""
-    await message.answer(
-        "Выберите раздел:",
         reply_markup=get_main_keyboard(),
     )
 
