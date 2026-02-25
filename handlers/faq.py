@@ -3,7 +3,7 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from data.studio_info import FAQ
+from data.studio_info import FAQ, PRICES
 
 router = Router(name="faq")
 
@@ -16,6 +16,26 @@ def get_faq_keyboard():
     builder.button(text="◀️ Назад в меню", callback_data="menu:main")
     builder.adjust(1)
     return builder.as_markup()
+
+
+@router.callback_query(F.data == "menu:prices")
+async def show_prices(callback: CallbackQuery):
+    """Show price list."""
+    lines = ["*Цены Pilates Guru:*\n"]
+    for category in PRICES.values():
+        for item in category:
+            lines.append(f"• {item['name']}: {item['price']} ₽")
+    lines.append("\nДля записи нажмите «Записаться».")
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📅 Записаться", callback_data="menu:booking")
+    builder.button(text="◀️ Главное меню", callback_data="menu:main")
+    builder.adjust(1)
+    await callback.message.edit_text(
+        "\n".join(lines),
+        reply_markup=builder.as_markup(),
+        parse_mode="Markdown",
+    )
+    await callback.answer()
 
 
 @router.callback_query(F.data == "menu:faq")

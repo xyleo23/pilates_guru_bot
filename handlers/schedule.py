@@ -6,10 +6,13 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from services.yclients import YClientsService
 from config import YCLIENTS_TOKEN, YCLIENTS_USER_TOKEN, YCLIENTS_COMPANY_ID
+from data.studio_info import TRAINERS
 
 router = Router(name="schedule")
 
-yclients = YClientsService(YCLIENTS_TOKEN, YCLIENTS_USER_TOKEN, YCLIENTS_COMPANY_ID)
+yclients = YClientsService(
+    YCLIENTS_TOKEN, YCLIENTS_USER_TOKEN, str(YCLIENTS_COMPANY_ID)
+)
 
 
 @router.callback_query(F.data == "menu:schedule")
@@ -21,6 +24,8 @@ async def show_schedule(callback: CallbackQuery):
     try:
         services = await yclients.get_services()
         staff = await yclients.get_staff()
+        if not staff:
+            staff = [{"id": i + 1, "name": name} for i, name in enumerate(TRAINERS)]
         dates = await yclients.get_available_dates()
 
         if not dates and not services:

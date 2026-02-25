@@ -8,10 +8,13 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from services.yclients import YClientsService
 from config import YCLIENTS_TOKEN, YCLIENTS_USER_TOKEN, YCLIENTS_COMPANY_ID
+from data.studio_info import PRICES, TRAINERS
 
 router = Router(name="booking")
 
-yclients = YClientsService(YCLIENTS_TOKEN, YCLIENTS_USER_TOKEN, YCLIENTS_COMPANY_ID)
+yclients = YClientsService(
+    YCLIENTS_TOKEN, YCLIENTS_USER_TOKEN, str(YCLIENTS_COMPANY_ID)
+)
 
 
 class BookingStates(StatesGroup):
@@ -34,6 +37,17 @@ async def start_booking(callback: CallbackQuery, state: FSMContext):
 
     try:
         services = await yclients.get_services()
+        if not services:
+            services = []
+            idx = 1
+            for category in PRICES.values():
+                for item in category:
+                    services.append({
+                        "id": idx,
+                        "title": item["name"],
+                        "price": item.get("price", ""),
+                    })
+                    idx += 1
         if not services:
             await callback.message.answer(
                 "К сожалению, сейчас нет доступных услуг для записи. "
@@ -69,7 +83,8 @@ async def chose_service(callback: CallbackQuery, state: FSMContext):
     try:
         staff = await yclients.get_staff(service_id=service_id)
         staff = [s for s in staff if s.get("bookable", True)]
-
+        if not staff:
+            staff = [{"id": i + 1, "name": name} for i, name in enumerate(TRAINERS)]
         if not staff:
             await callback.message.edit_text(
                 "Нет доступных инструкторов для этой услуги. Выберите другую услугу."

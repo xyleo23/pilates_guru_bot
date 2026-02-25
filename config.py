@@ -16,5 +16,6 @@ def _get_env(key: str) -> str:
 BOT_TOKEN = _get_env("BOT_TOKEN")
 YCLIENTS_TOKEN = _get_env("YCLIENTS_TOKEN")
 YCLIENTS_USER_TOKEN = os.getenv("YCLIENTS_USER_TOKEN", "")
-YCLIENTS_COMPANY_ID = _get_env("YCLIENTS_COMPANY_ID")
+YCLIENTS_COMPANY_ID = os.getenv("YCLIENTS_COMPANY_ID", "")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 ADMIN_TG_ID = int(_get_env("ADMIN_TG_ID"))
