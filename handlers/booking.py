@@ -33,15 +33,13 @@ class BookingStates(StatesGroup):
     payment = State()
 
 
-@router.callback_query(F.data == "menu:booking")
-async def start_booking(callback: CallbackQuery, state: FSMContext):
-    """Start booking flow."""
+async def _show_booking_services(msg_or_cb, state: FSMContext, *, from_callback: bool):
+    """Общая логика показа услуг — для callback и message."""
     data = await state.get_data()
     preferred_trainer = data.get("preferred_trainer")
     await state.clear()
     if preferred_trainer:
         await state.update_data(preferred_trainer=preferred_trainer)
-    await callback.answer()
 
     try:
         services = await yclients.get_services()
@@ -57,10 +55,14 @@ async def start_booking(callback: CallbackQuery, state: FSMContext):
                     })
                     idx += 1
         if not services:
-            await callback.message.answer(
+            text = (
                 "К сожалению, сейчас нет доступных услуг для записи. "
                 "Попробуйте позже или свяжитесь с нами."
             )
+            if from_callback:
+                await msg_or_cb.message.answer(text)
+            else:
+                await msg_or_cb.answer(text)
             return
 
         builder = InlineKeyboardBuilder()
@@ -73,14 +75,59 @@ async def start_booking(callback: CallbackQuery, state: FSMContext):
 
         await state.update_data(services=services)
         await state.set_state(BookingStates.choose_service)
-        await callback.message.edit_text(
-            "Выберите тип занятия:",
-            reply_markup=builder.as_markup(),
-        )
+        text = "Выберите тип занятия:"
+        if from_callback:
+            await msg_or_cb.message.edit_text(text, reply_markup=builder.as_markup())
+        else:
+            await msg_or_cb.answer(text, reply_markup=builder.as_markup())
     except YClientsNotConfigured:
-        await callback.message.answer(UNAVAILABLE_MSG)
+        err = UNAVAILABLE_MSG
+        if from_callback:
+            await msg_or_cb.message.answer(err)
+        else:
+            await msg_or_cb.answer(err)
     except Exception as e:
-        await callback.message.answer(f"Ошибка при загрузке услуг: {e}")
+        err = f"Ошибка при загрузке услуг: {e}"
+        if from_callback:
+            await msg_or_cb.message.answer(err)
+        else:
+            await msg_or_cb.answer(err)
+
+
+@router.message(F.text == "📅 Записаться")
+async def start_booking_from_message(message: Message, state: FSMContext):
+    """Старт бронирования по кнопке Reply-клавиатуры."""
+    await _show_booking_services(message, state, from_callback=False)
+
+
+@router.callback_query(F.data == "menu:booking")
+async def start_booking(callback: CallbackQuery, state: FSMContext):
+    """Start booking flow."""
+    await callback.answer()
+    await _show_booking_services(callback, state, from_callback=True)
+
+
+@router.callback_query(BookingStates.choose_staff, F.data == "book_back:service")
+async def book_back_to_service(callback: CallbackQuery, state: FSMContext):
+    """Назад от выбора сотрудника к выбору услуги."""
+    data = await state.get_data()
+    services = data.get("services", [])
+    if not services:
+        await callback.answer("Начните запись заново.", show_alert=True)
+        return
+    await state.set_state(BookingStates.choose_service)
+    builder = InlineKeyboardBuilder()
+    for s in services[:15]:
+        sid = s.get("id") or s.get("api_id")
+        title = (s.get("title") or s.get("booking_title") or "Услуга")[:40]
+        builder.button(text=title, callback_data=f"book_svc:{sid}")
+    builder.button(text="❌ Отмена", callback_data="menu:main")
+    builder.adjust(1)
+    await callback.message.edit_text(
+        "Выберите тип занятия:",
+        reply_markup=builder.as_markup(),
+    )
+    await callback.answer()
 
 
 @router.callback_query(BookingStates.choose_service, F.data.startswith("book_svc:"))
@@ -136,6 +183,7 @@ async def chose_service(callback: CallbackQuery, state: FSMContext):
             desc = s.get("best_for") or s.get("experience") or ""
             label = prefix + f"{name}" + (f" — {desc[:25]}…" if len(desc) > 25 else f" — {desc}" if desc else "")
             builder.button(text=label[:60], callback_data=f"book_staff:{sid}")
+        builder.button(text="⬅️ Назад", callback_data="book_back:service")
         builder.button(text="❌ Отмена", callback_data="menu:main")
         builder.adjust(1)
 
@@ -146,6 +194,54 @@ async def chose_service(callback: CallbackQuery, state: FSMContext):
         )
     except YClientsNotConfigured:
         await callback.message.answer(UNAVAILABLE_MSG)
+    except Exception as e:
+        await callback.message.answer(f"Ошибка: {e}")
+
+
+@router.callback_query(BookingStates.choose_date, F.data == "book_back:staff")
+async def book_back_to_staff(callback: CallbackQuery, state: FSMContext):
+    """Назад от выбора даты к выбору сотрудника."""
+    data = await state.get_data()
+    service_id = data.get("service_id")
+    if not service_id:
+        await callback.answer("Ошибка. Начните запись заново.", show_alert=True)
+        return
+    await callback.answer()
+    # Имитируем возврат: показываем выбор сотрудника
+    await state.set_state(BookingStates.choose_staff)
+    try:
+        staff = await yclients.get_staff(service_id=service_id)
+        staff = [s for s in staff if s.get("bookable", True)]
+        for s in staff:
+            name = s.get("name", "")
+            info = TRAINERS_INFO.get(name, {})
+            s["best_for"] = info.get("best_for", "")
+            s["experience"] = info.get("experience", "")
+        if not staff:
+            staff = [{"id": i + 1, "name": name} for i, name in enumerate(TRAINERS)]
+        preferred_trainer = data.get("preferred_trainer")
+
+        def _norm(s: str) -> str:
+            return (s or "").strip().casefold().replace("ё", "е")
+
+        if preferred_trainer:
+            preferred_list = [s for s in staff if _norm(s.get("name", "")) == _norm(preferred_trainer)]
+            other_list = [s for s in staff if _norm(s.get("name", "")) != _norm(preferred_trainer)]
+            staff = preferred_list + other_list
+
+        builder = InlineKeyboardBuilder()
+        for s in staff[:10]:
+            sid = s.get("id")
+            name = (s.get("name") or "Инструктор")[:35]
+            is_recommended = preferred_trainer and _norm(s.get("name", "")) == _norm(preferred_trainer)
+            prefix = "⭐ Рекомендуем " if is_recommended else ""
+            desc = s.get("best_for") or s.get("experience") or ""
+            label = prefix + f"{name}" + (f" — {desc[:25]}…" if len(desc) > 25 else f" — {desc}" if desc else "")
+            builder.button(text=label[:60], callback_data=f"book_staff:{sid}")
+        builder.button(text="⬅️ Назад", callback_data="book_back:service")
+        builder.button(text="❌ Отмена", callback_data="menu:main")
+        builder.adjust(1)
+        await callback.message.edit_text("Выберите инструктора:", reply_markup=builder.as_markup())
     except Exception as e:
         await callback.message.answer(f"Ошибка: {e}")
 
@@ -179,6 +275,7 @@ async def chose_staff(callback: CallbackQuery, state: FSMContext):
                 text=label,
                 callback_data=f"book_date:{date_str}",
             )
+        builder.button(text="⬅️ Назад", callback_data="book_back:staff")
         builder.button(text="❌ Отмена", callback_data="menu:main")
         builder.adjust(2)
 
@@ -189,6 +286,38 @@ async def chose_staff(callback: CallbackQuery, state: FSMContext):
         )
     except YClientsNotConfigured:
         await callback.message.answer(UNAVAILABLE_MSG)
+    except Exception as e:
+        await callback.message.answer(f"Ошибка: {e}")
+
+
+@router.callback_query(BookingStates.choose_time, F.data == "book_back:date")
+async def book_back_to_date(callback: CallbackQuery, state: FSMContext):
+    """Назад от выбора времени к выбору даты."""
+    data = await state.get_data()
+    staff_id = data.get("staff_id")
+    service_id = data.get("service_id")
+    if not staff_id or not service_id:
+        await callback.answer("Ошибка. Начните запись заново.", show_alert=True)
+        return
+    await callback.answer()
+    try:
+        dates = await yclients.get_available_dates(staff_id, service_id)
+        if not dates:
+            await callback.message.edit_text("Нет свободных дат.")
+            return
+        await state.set_state(BookingStates.choose_date)
+        builder = InlineKeyboardBuilder()
+        for date_str in dates[:14]:
+            try:
+                dt = datetime.strptime(date_str, "%Y-%m-%d")
+                label = dt.strftime("%d.%m.%Y")
+            except (ValueError, TypeError):
+                label = date_str
+            builder.button(text=label, callback_data=f"book_date:{date_str}")
+        builder.button(text="⬅️ Назад", callback_data="book_back:staff")
+        builder.button(text="❌ Отмена", callback_data="menu:main")
+        builder.adjust(2)
+        await callback.message.edit_text("Выберите дату:", reply_markup=builder.as_markup())
     except Exception as e:
         await callback.message.answer(f"Ошибка: {e}")
 
@@ -237,6 +366,7 @@ async def chose_date(callback: CallbackQuery, state: FSMContext):
                 builder.button(text=label, callback_data=f"book_time:{i}")
             else:
                 builder.button(text=str(t), callback_data=f"book_time:{i}")
+        builder.button(text="⬅️ Назад", callback_data="book_back:date")
         builder.button(text="❌ Отмена", callback_data="menu:main")
         builder.adjust(3)
 
@@ -261,6 +391,41 @@ def _to_yclients_datetime(s: str, date_str: str = "") -> str:
     if len(s) == 10 and date_str:
         return f"{date_str} 09:00:00"
     return s[:19] if len(s) >= 19 else s
+
+
+@router.callback_query(BookingStates.confirm, F.data == "book_back:time")
+async def book_back_to_time(callback: CallbackQuery, state: FSMContext):
+    """Назад от подтверждения к выбору времени."""
+    data = await state.get_data()
+    times = data.get("available_times", [])
+    if not times:
+        await callback.answer("Ошибка. Начните запись заново.", show_alert=True)
+        return
+    await state.set_state(BookingStates.choose_time)
+    await callback.answer()
+    builder = InlineKeyboardBuilder()
+    for i, t in enumerate(times[:20]):
+        if isinstance(t, dict):
+            dt_str = t.get("datetime", "") or t.get("time", "")
+            if isinstance(dt_str, str):
+                for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%H:%M"):
+                    try:
+                        dt = datetime.strptime(dt_str.replace("Z", "")[:19], fmt)
+                        label = dt.strftime("%H:%M")
+                        break
+                    except (ValueError, TypeError):
+                        continue
+                else:
+                    label = str(dt_str)[:8]
+            else:
+                label = str(t.get("time", ""))[:8]
+            builder.button(text=label, callback_data=f"book_time:{i}")
+        else:
+            builder.button(text=str(t), callback_data=f"book_time:{i}")
+    builder.button(text="⬅️ Назад", callback_data="book_back:date")
+    builder.button(text="❌ Отмена", callback_data="menu:main")
+    builder.adjust(3)
+    await callback.message.edit_text("Выберите время:", reply_markup=builder.as_markup())
 
 
 @router.callback_query(BookingStates.choose_time, F.data.startswith("book_time:"))
@@ -322,6 +487,7 @@ async def show_confirm(message: Message, state: FSMContext):
     data = await state.get_data()
     builder = InlineKeyboardBuilder()
     builder.button(text="✅ Подтвердить запись", callback_data="book_confirm")
+    builder.button(text="⬅️ Назад", callback_data="book_back:time")
     builder.button(text="❌ Отмена", callback_data="menu:main")
     builder.adjust(1)
 

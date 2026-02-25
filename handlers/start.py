@@ -3,11 +3,21 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 
 from data.studio_info import STUDIO
 
 router = Router(name="start")
+
+
+def get_main_reply_keyboard():
+    """Постоянная клавиатура внизу экрана."""
+    builder = ReplyKeyboardBuilder()
+    builder.button(text="📅 Записаться")
+    builder.button(text="👤 Мой профиль")
+    builder.button(text="ℹ️ О студии")
+    builder.button(text="❓ Помощь")
+    return builder.as_markup(resize_keyboard=True)
 
 
 def get_main_keyboard():
@@ -31,9 +41,29 @@ async def cmd_start(message: Message):
         f"Namaste! 🙏\n\n"
         f"Добро пожаловать в студию пилатеса *{STUDIO['name']}*!\n\n"
         f"Помогу записаться на тренировку, расскажу о ценах и расписании.\n\n"
+        f"Вы можете воспользоваться меню ниже или просто написать текстом / "
+        f"отправить голосовое сообщение, и я вас пойму.\n\n"
         f"Выберите действие:"
     )
-    await message.answer(text, reply_markup=get_main_keyboard(), parse_mode="Markdown")
+    reply_kb = get_main_reply_keyboard()
+    await message.answer(
+        text,
+        reply_markup=reply_kb,
+        parse_mode="Markdown",
+    )
+    await message.answer(
+        "Или выберите из меню:",
+        reply_markup=get_main_keyboard(),
+    )
+
+
+@router.message(F.text.in_(["👤 Мой профиль", "ℹ️ О студии", "❓ Помощь"]))
+async def on_reply_menu_button(message: Message):
+    """Обработка кнопок Reply-клавиатуры: показать inline-меню."""
+    await message.answer(
+        "Выберите раздел:",
+        reply_markup=get_main_keyboard(),
+    )
 
 
 @router.callback_query(F.data == "menu:main")

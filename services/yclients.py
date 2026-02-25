@@ -37,6 +37,11 @@ class YClientsService:
                 method, url, headers=self._headers, params=params, json=json
             ) as resp:
                 data = await resp.json()
+                # YClients может вернуть list вместо dict (например, [] или [...])
+                if isinstance(data, list):
+                    return {"success": True, "data": data}
+                if not isinstance(data, dict):
+                    return {"success": False, "data": None}
                 if not data.get("success"):
                     msg = data.get("meta", {}).get("message") or str(data)
                     logging.warning(f"YClients {method} {path} → {msg}")
@@ -48,7 +53,7 @@ class YClientsService:
             data = await self._request(
                 "GET", f"/book_services/{self.company_id}"
             )
-            return data.get("success", False)
+            return bool(isinstance(data, dict) and data.get("success", False))
         except YClientsNotConfigured:
             return False
         except Exception as e:
@@ -63,6 +68,8 @@ class YClientsService:
         data = await self._request(
             "GET", f"/book_services/{self.company_id}", params=params or None
         )
+        if not isinstance(data, dict):
+            return []
         result = data.get("data")
         return result if isinstance(result, list) else []
 
@@ -75,7 +82,10 @@ class YClientsService:
         data = await self._request(
             "GET", f"/book_staff/{self.company_id}", params=params or None
         )
-        raw = data.get("data")
+        if not isinstance(data, dict):
+            raw = []
+        else:
+            raw = data.get("data")
         items = raw if isinstance(raw, list) else []
         filtered = [
             {
@@ -108,7 +118,10 @@ class YClientsService:
         params = {"service_ids[]": service_id}
         path = f"/book_times/{self.company_id}/{staff_id}/{date}"
         data = await self._request("GET", path, params=params)
-        result = data.get("data")
+        if not isinstance(data, dict):
+            result = []
+        else:
+            result = data.get("data")
         return result if isinstance(result, list) else []
 
     async def create_booking(
@@ -142,7 +155,7 @@ class YClientsService:
         data = await self._request(
             "POST", f"/book_record/{self.company_id}", json=payload
         )
-        if data.get("success"):
+        if isinstance(data, dict) and data.get("success"):
             record_id = None
             inner = data.get("data")
             if isinstance(inner, dict) and "id" in inner:
@@ -150,6 +163,8 @@ class YClientsService:
             elif isinstance(inner, (int, float)):
                 record_id = int(inner)
             return True, "Запись создана", record_id
+        if not isinstance(data, dict):
+            return False, str(data), None
         msg = (
             data.get("meta", {}).get("message")
             or data.get("errors", {}).get("message")
@@ -167,7 +182,10 @@ class YClientsService:
         data = await self._request(
             "GET", f"/records/{self.company_id}", params=params
         )
-        result = data.get("data")
+        if not isinstance(data, dict):
+            result = []
+        else:
+            result = data.get("data")
         items = result if isinstance(result, list) else []
         return [r for r in items if r.get("active", True)]
 
@@ -176,8 +194,10 @@ class YClientsService:
         data = await self._request(
             "DELETE", f"/records/{self.company_id}/{record_id}"
         )
-        if data.get("success"):
+        if isinstance(data, dict) and data.get("success"):
             return True, "Запись отменена"
+        if not isinstance(data, dict):
+            return False, str(data)
         msg = (
             data.get("meta", {}).get("message")
             or data.get("errors", {}).get("message")
@@ -208,8 +228,10 @@ class YClientsService:
         data = await self._request(
             "PUT", f"/records/{self.company_id}/{record_id}", json=payload
         )
-        if data.get("success"):
+        if isinstance(data, dict) and data.get("success"):
             return True, "Перенос выполнен"
+        if not isinstance(data, dict):
+            return False, str(data)
         msg = (
             data.get("meta", {}).get("message")
             or data.get("errors", {}).get("message")
@@ -225,7 +247,10 @@ class YClientsService:
         data = await self._request(
             "GET", f"/clients/{self.company_id}", params=params
         )
-        result = data.get("data")
+        if not isinstance(data, dict):
+            result = None
+        else:
+            result = data.get("data")
         if isinstance(result, list) and result:
             return result[0]
         return None
