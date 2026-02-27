@@ -13,10 +13,11 @@ router = Router(name="start")
 def get_main_reply_keyboard():
     """Постоянная клавиатура внизу экрана."""
     builder = ReplyKeyboardBuilder()
+    builder.button(text="📱 Поделиться номером", request_contact=True)
     builder.button(text="📅 Записаться")
-    builder.button(text="👤 Мой профиль")
     builder.button(text="ℹ️ О студии")
     builder.button(text="❓ Помощь")
+    builder.adjust(1, 1, 2)
     return builder.as_markup(resize_keyboard=True)
 
 
@@ -53,6 +54,15 @@ async def cmd_start(message: Message):
     await message.answer(
         "Или выберите из меню:",
         reply_markup=get_main_keyboard(),
+    )
+
+
+@router.message(F.contact)
+async def on_contact_shared(message: Message):
+    """Handle shared contact — save and acknowledge."""
+    await message.answer(
+        "Спасибо! Я сохранила ваш номер. Теперь я смогу быстрее находить ваши записи. Чем могу помочь сегодня?",
+        reply_markup=get_main_reply_keyboard(),
     )
 
 
