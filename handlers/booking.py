@@ -44,7 +44,6 @@ async def _show_booking_services(msg_or_cb, state: FSMContext, *, from_callback:
     try:
         services = await yclients.get_services()
         if not services:
-            services = []
             idx = 1
             for category in PRICES.values():
                 for item in category:
@@ -67,6 +66,8 @@ async def _show_booking_services(msg_or_cb, state: FSMContext, *, from_callback:
 
         builder = InlineKeyboardBuilder()
         for s in services[:15]:
+            if not isinstance(s, dict):
+                continue
             sid = s.get("id") or s.get("api_id")
             title = (s.get("title") or s.get("booking_title") or "Услуга")[:40]
             builder.button(text=title, callback_data=f"book_svc:{sid}")
@@ -118,6 +119,8 @@ async def book_back_to_service(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BookingStates.choose_service)
     builder = InlineKeyboardBuilder()
     for s in services[:15]:
+        if not isinstance(s, dict):
+            continue
         sid = s.get("id") or s.get("api_id")
         title = (s.get("title") or s.get("booking_title") or "Услуга")[:40]
         builder.button(text=title, callback_data=f"book_svc:{sid}")

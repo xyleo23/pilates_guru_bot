@@ -60,8 +60,35 @@ class YClientsService:
             logging.warning(f"YClients check_connection: {e}")
             return False
 
+    def _normalize_services(self, raw: list) -> list[dict]:
+        """Convert YClients response to flat list of dicts. Handles nested lists/categories."""
+        if not raw:
+            return []
+
+        def flatten(items: list) -> list:
+            out = []
+            for x in items or []:
+                if isinstance(x, list):
+                    out.extend(flatten(x))
+                else:
+                    out.append(x)
+            return out
+
+        flat = flatten(raw)
+        result = []
+        for item in flat:
+            if not isinstance(item, dict):
+                continue
+            if "services" in item and isinstance(item["services"], list):
+                for sub in item["services"]:
+                    if isinstance(sub, dict):
+                        result.append(sub)
+                continue
+            result.append(item)
+        return result
+
     async def get_services(self, staff_id=None) -> list[dict]:
-        """Список услуг. staff_id — опциональный фильтр."""
+        """Список услуг. staff_id — опциональный фильтр. Returns flat list of dicts."""
         params = {}
         if staff_id is not None:
             params["staff_id"] = staff_id
@@ -71,7 +98,8 @@ class YClientsService:
         if not isinstance(data, dict):
             return []
         result = data.get("data")
-        return result if isinstance(result, list) else []
+        raw = result if isinstance(result, list) else []
+        return self._normalize_services(raw)
 
     async def get_staff(self, service_id=None) -> list[dict]:
         """Список сотрудников (только bookable=True).

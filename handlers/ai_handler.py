@@ -3,10 +3,12 @@ import logging
 
 from aiogram import Router, F
 from aiogram.types import Message, InlineKeyboardMarkup
+from aiogram.filters import StateFilter
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from config import OPENAI_API_KEY
 from services.ai_agent import get_ai_response
+from handlers.contact import NewClientStates
 
 router = Router(name="ai")
 
@@ -20,7 +22,10 @@ def get_main_menu_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-@router.message(F.text & ~F.text.startswith("/"))
+@router.message(
+    F.text & ~F.text.startswith("/"),
+    ~StateFilter(NewClientStates),
+)
 async def handle_free_text(message: Message):
     """Catch-all for text: show typing, get AI response, send answer."""
     await message.bot.send_chat_action(

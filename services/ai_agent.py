@@ -54,6 +54,52 @@ def _append_to_history(user_id: int, user_text: str, assistant_text: str) -> Non
     DIALOG_HISTORY[user_id].append({"role": "assistant", "content": assistant_text})
 
 
+NEW_CLIENT_PROMPT = """Ты Марина, администратор студии пилатеса PILATES GURU.
+Клиент впервые в студии. Он ответил на вопросы:
+- Цели: {goals}
+- Травмы/противопоказания: {injuries}
+
+Сгенерируй короткое (2-4 предложения) персональное приветствие. Поблагодари за ответы, отметь их цели, мягко упомяни про противопоказания (если есть), пригласи записаться на пробное занятие. Дружелюбный женский стиль, эмодзи. Не генерируй ссылки."""
+
+
+async def get_new_client_welcome(
+    user_id: int, goals: str, injuries: str
+) -> str:
+    """Generate personalized welcome for new client based on questionnaire."""
+    client = _get_client()
+    if not client:
+        return (
+            "Рады видеть вас в Pilates Guru! 🙏 "
+            "Запишитесь на пробное занятие через кнопку ниже — подберём идеальный формат."
+        )
+
+    content = NEW_CLIENT_PROMPT.format(
+        goals=goals or "не указано",
+        injuries=injuries or "нет",
+    )
+    messages = [{"role": "system", "content": content}]
+    messages.append({"role": "user", "content": "Сгенерируй приветствие."})
+
+    try:
+        resp = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            max_tokens=300,
+            temperature=0.7,
+        )
+        text = resp.choices[0].message.content or ""
+        return text.strip() or (
+            "Рады видеть вас в Pilates Guru! 🙏 "
+            "Запишитесь на пробное занятие — подберём идеальный формат."
+        )
+    except Exception as e:
+        logger.exception("AI new client welcome error: %s", e)
+        return (
+            "Рады видеть вас в Pilates Guru! 🙏 "
+            "Запишитесь на пробное занятие через кнопку ниже."
+        )
+
+
 async def get_ai_response(user_id: int, text: str) -> str:
     """
     Get AI response for the user message. Keeps last 10 messages per user for context.

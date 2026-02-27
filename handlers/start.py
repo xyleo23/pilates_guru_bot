@@ -1,24 +1,24 @@
 """Start command and main menu handler."""
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import CallbackQuery, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from data.studio_info import STUDIO
 
 router = Router(name="start")
 
 
-def get_main_reply_keyboard():
-    """Постоянная клавиатура внизу экрана."""
-    builder = ReplyKeyboardBuilder()
-    builder.button(text="📱 Поделиться номером", request_contact=True)
-    builder.button(text="📅 Записаться")
-    builder.button(text="ℹ️ О студии")
-    builder.button(text="❓ Помощь")
-    builder.adjust(1, 1, 2)
-    return builder.as_markup(resize_keyboard=True)
+def get_share_phone_keyboard() -> ReplyKeyboardMarkup:
+    """Single button: Share Phone (request_contact)."""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📱 Поделиться номером", request_contact=True)]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=False,
+    )
 
 
 def get_main_keyboard():
@@ -35,34 +35,28 @@ def get_main_keyboard():
     return builder.as_markup()
 
 
+def get_onboarding_main_keyboard():
+    """Simplified main menu for returning/new clients: Записаться, Цены, Мои записи."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📅 Записаться", callback_data="menu:booking")
+    builder.button(text="💰 Цены", callback_data="menu:prices")
+    builder.button(text="👤 Мои записи", callback_data="menu:my_records")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 @router.message(CommandStart())
-async def cmd_start(message: Message):
-    """Handle /start command."""
+async def cmd_start(message):
+    """Handle /start — single greeting, Share Phone only."""
     text = (
-        f"Добро пожаловать в студию пилатеса *{STUDIO['name']}*!\n\n"
-        f"Помогу записаться на тренировку, расскажу о ценах и расписании.\n\n"
-        f"Вы можете воспользоваться меню ниже или просто написать текстом / "
-        f"отправить голосовое сообщение, и я вас пойму.\n\n"
-        f"Выберите действие:"
+        "Добро пожаловать в студию Pilates Guru! 🌸\n\n"
+        "Меня зовут Марина, я ваш виртуальный администратор. "
+        "Чтобы я могла проверить ваши абонементы или подобрать тренировку, "
+        "пожалуйста, поделитесь номером телефона 👇"
     )
-    reply_kb = get_main_reply_keyboard()
     await message.answer(
         text,
-        reply_markup=reply_kb,
-        parse_mode="Markdown",
-    )
-    await message.answer(
-        "Или выберите из меню:",
-        reply_markup=get_main_keyboard(),
-    )
-
-
-@router.message(F.contact)
-async def on_contact_shared(message: Message):
-    """Handle shared contact — save and acknowledge."""
-    await message.answer(
-        "Спасибо! Я сохранила ваш номер. Теперь я смогу быстрее находить ваши записи. Чем могу помочь сегодня?",
-        reply_markup=get_main_reply_keyboard(),
+        reply_markup=get_share_phone_keyboard(),
     )
 
 
