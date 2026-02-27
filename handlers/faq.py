@@ -35,9 +35,9 @@ def get_faq_keyboard():
     builder = InlineKeyboardBuilder()
     for q, _a, i in _faq_list():
         builder.button(text=(q[:50] + "…") if len(q) > 50 else q, callback_data=f"faq:{i}")
-    builder.button(text="🎁 Акции", callback_data="menu:promos")
-    builder.button(text="📋 Мои записи", callback_data="menu:my_records")
-    builder.button(text="◀️ Назад в меню", callback_data="menu:main")
+    builder.button(text="Акции", callback_data="menu:promos")
+    builder.button(text="Мои записи", callback_data="menu:my_records")
+    builder.button(text="Назад в меню", callback_data="menu:main")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -51,8 +51,8 @@ async def show_prices(callback: CallbackQuery):
             lines.append(f"• {item['name']}: {item['price']} ₽")
     lines.append("\nДля записи нажмите «Записаться».")
     builder = InlineKeyboardBuilder()
-    builder.button(text="📅 Записаться", callback_data="menu:booking")
-    builder.button(text="◀️ Главное меню", callback_data="menu:main")
+    builder.button(text="Записаться", callback_data="menu:booking")
+    builder.button(text="Главное меню", callback_data="menu:main")
     builder.adjust(1)
     await callback.message.edit_text(
         "\n".join(lines),
@@ -69,9 +69,9 @@ async def show_faq_list(callback: CallbackQuery):
     builder = InlineKeyboardBuilder()
     for q, _a, i in _faq_list():
         builder.button(text=q[:45] + ("…" if len(q) > 45 else ""), callback_data=f"faq:{i}")
-    builder.button(text="🎁 Акции", callback_data="menu:promos")
-    builder.button(text="📋 Мои записи", callback_data="menu:my_records")
-    builder.button(text="◀️ Назад в меню", callback_data="menu:main")
+    builder.button(text="Акции", callback_data="menu:promos")
+    builder.button(text="Мои записи", callback_data="menu:my_records")
+    builder.button(text="Назад в меню", callback_data="menu:main")
     builder.adjust(1)
 
     await callback.message.edit_text(text, reply_markup=builder.as_markup())
@@ -84,16 +84,16 @@ async def show_contacts(callback: CallbackQuery):
     s = STUDIO
     text = (
         f"*{s['name']}*\n\n"
-        f"📍 Адрес: {s['address']}\n"
-        f"🚇 {s['metro']}\n"
-        f"🕐 {s['schedule']}\n\n"
-        f"📞 Телефон: {s['phone']}\n"
-        f"✉️ Telegram: {s['telegram']}\n"
-        f"📸 Instagram: {s.get('instagram', s['telegram'])}\n"
+        f"Адрес: {s['address']}\n"
+        f"Метро: {s['metro']}\n"
+        f"Режим работы: {s['schedule']}\n\n"
+        f"Телефон: {s['phone']}\n"
+        f"Telegram: {s['telegram']}\n"
+        f"Instagram: {s.get('instagram', s['telegram'])}\n"
     )
     builder = InlineKeyboardBuilder()
-    builder.button(text="📅 Записаться", callback_data="menu:booking")
-    builder.button(text="◀️ Главное меню", callback_data="menu:main")
+    builder.button(text="Записаться", callback_data="menu:booking")
+    builder.button(text="Главное меню", callback_data="menu:main")
     builder.adjust(1)
     await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
     await callback.answer()
@@ -109,8 +109,8 @@ async def show_promos(callback: CallbackQuery):
         lines.append(f"• *{title}*\n{details}\n")
     text = "\n".join(lines)
     builder = InlineKeyboardBuilder()
-    builder.button(text="📅 Записаться", callback_data="menu:booking")
-    builder.button(text="◀️ Главное меню", callback_data="menu:main")
+    builder.button(text="Записаться", callback_data="menu:booking")
+    builder.button(text="Главное меню", callback_data="menu:main")
     builder.adjust(1)
     await callback.message.edit_text(
         text,
@@ -132,8 +132,8 @@ async def show_faq_answer(callback: CallbackQuery):
         text = "Вопрос не найден."
 
     builder = InlineKeyboardBuilder()
-    builder.button(text="◀️ К списку вопросов", callback_data="menu:faq")
-    builder.button(text="🏠 В главное меню", callback_data="menu:main")
+    builder.button(text="К списку вопросов", callback_data="menu:faq")
+    builder.button(text="В главное меню", callback_data="menu:main")
     builder.adjust(1)
 
     await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")

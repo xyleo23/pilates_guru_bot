@@ -9,15 +9,16 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from config import OPENAI_API_KEY
 from services.ai_agent import get_ai_response
 from handlers.contact import NewClientStates
+from handlers.start import get_premium_reply_keyboard
 
 router = Router(name="ai")
 
 
 def get_main_menu_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="📅 Записаться", callback_data="menu:booking")
-    builder.button(text="💰 Цены и услуги", callback_data="menu:prices")
-    builder.button(text="◀️ Главное меню", callback_data="menu:main")
+    builder.button(text="Записаться", callback_data="menu:booking")
+    builder.button(text="Цены и услуги", callback_data="menu:prices")
+    builder.button(text="Главное меню", callback_data="menu:main")
     builder.adjust(2, 1)
     return builder.as_markup()
 
@@ -37,7 +38,7 @@ async def handle_free_text(message: Message):
 
     await message.answer(
         ai_text,
-        reply_markup=get_main_menu_keyboard(),
+        reply_markup=get_premium_reply_keyboard(),
     )
 
 
@@ -46,7 +47,8 @@ async def handle_voice(message: Message):
     """Transcribe voice via Whisper, then process as text with AI agent."""
     if not OPENAI_API_KEY:
         await message.answer(
-            "Пожалуйста, напишите ваш вопрос текстом 🙏",
+            "Пожалуйста, напишите ваш вопрос текстом.",
+            reply_markup=get_premium_reply_keyboard()
         )
         return
 
@@ -71,12 +73,13 @@ async def handle_voice(message: Message):
         logging.error("Whisper error: %s", e)
         await message.answer(
             "Не удалось распознать голосовое. "
-            "Напишите текстом — отвечу сразу! 🙏",
+            "Напишите текстом — отвечу сразу!",
+            reply_markup=get_premium_reply_keyboard()
         )
         return
 
     await message.answer(
-        f"🎤 Распознано: _{recognized_text}_",
+        f"Распознано: _{recognized_text}_",
         parse_mode="Markdown"
     )
 

@@ -10,7 +10,7 @@ from aiogram.types import ReplyKeyboardRemove
 
 from config import YCLIENTS_TOKEN, YCLIENTS_USER_TOKEN, YCLIENTS_COMPANY_ID
 from services.yclients import YClientsService, YClientsNotConfigured
-from handlers.start import get_onboarding_main_keyboard
+from handlers.start import get_premium_reply_keyboard
 from services.ai_agent import get_new_client_welcome
 
 router = Router(name="contact")
@@ -45,7 +45,7 @@ async def on_contact_shared(message: Message, state: FSMContext):
 
     phone = _normalize_phone(message.contact.phone_number)
     await state.update_data(phone=phone)
-    await message.answer("⏳ Проверяю...", reply_markup=ReplyKeyboardRemove())
+    await message.answer("Проверяю...", reply_markup=ReplyKeyboardRemove())
 
     try:
         client = await yclients.get_client_by_phone(phone)
@@ -65,7 +65,7 @@ async def on_contact_shared(message: Message, state: FSMContext):
         text = f"Рада вас снова видеть, {display_name}! Чем могу помочь сегодня?"
         await message.answer(
             text,
-            reply_markup=get_onboarding_main_keyboard(),
+            reply_markup=get_premium_reply_keyboard(),
         )
     else:
         await state.set_state(NewClientStates.goals)
@@ -107,5 +107,5 @@ async def onboarding_injuries(message: Message, state: FSMContext):
     await state.clear()
     await message.answer(
         welcome_text,
-        reply_markup=get_onboarding_main_keyboard(),
+        reply_markup=get_premium_reply_keyboard(),
     )

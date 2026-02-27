@@ -6,6 +6,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import BotCommand
 
 from config import BOT_TOKEN, YCLIENTS_TOKEN, YCLIENTS_USER_TOKEN, YCLIENTS_COMPANY_ID
 from handlers import setup_handlers
@@ -26,14 +27,24 @@ async def main():
     )
     ok = await yclients.check_connection()
     if ok:
-        logger.info("✅ YClients подключён")
+        logger.info("YClients подключён")
     else:
-        logger.warning("⚠️ YClients недоступен — работаем с fallback данными")
+        logger.warning("YClients недоступен — работаем с fallback данными")
 
     bot = Bot(
         token=BOT_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN),
     )
+    
+    # Set premium command menu
+    await bot.set_my_commands([
+        BotCommand(command="start", description="Главное меню"),
+        BotCommand(command="book", description="Запись на тренировку"),
+        BotCommand(command="my_bookings", description="Мои записи"),
+        BotCommand(command="prices", description="Услуги и цены"),
+        BotCommand(command="help", description="Связь с администратором")
+    ])
+    
     dp = Dispatcher(storage=MemoryStorage())
     dp.include_router(setup_handlers())
 
